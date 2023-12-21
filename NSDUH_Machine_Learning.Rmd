@@ -1,0 +1,551 @@
+---
+title: "NSDUH_Drug_Analysis"
+author: "Katelin Bauer"
+date: "2023-12-20"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    code_folding: show
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE, message = FALSE)
+```
+
+# Question 1 
+
+## Utilize multiple regression methods to determine if there is a relationship between the age of first cocaine use during adolescence and the following predictors: demographic variables, perceived risk of cocaine use, availability of cocaine, danger seeking, age of first alcohol use, and age of first cigarette use. 
+
+## Import NSDUH data
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(ggplot2)
+library(plyr)
+library(car)
+library(leaps)
+library(boot)
+library(glmnet)
+
+NSDUH_2020 <- read_csv("NSDUH_2020.csv")
+NSDUH_2021 <- read_csv("NSDUH_2021.csv")
+
+df_20.21 <- rbind.fill(NSDUH_2020, NSDUH_2021) 
+```
+
+## Data cleaning
+
+```{r}
+df_20.21 |>
+  select(DIFGETCOC,RSKYFQDGR,RSKYFQTES,CATAGE,IRALCAGE,IRCIGAGE,YODPREV,COCEVER,YEPRTDNG,COCAGE,RSKCOCMON,RSKCOCWK, NEWRACE2, IRSEX) -> df1
+
+df1 <- subset(df1, df1$COCAGE < 18)
+df1 <- subset(df1, !(CATAGE %in% c(3, 4))) # Exclude respondents who are 26 or older. 
+df1 <- subset(df1, !(COCEVER %in% c(991))) # Exclude respondents who never used cocaine. 
+df1 <- subset(df1, !(DIFGETCOC %in% c(85, 94, 97, 98))) 
+df1 <- subset(df1, !(RSKYFQDGR %in% c(85, 94, 97, 98)))
+df1 <- subset(df1, !(RSKYFQTES %in% c(85, 94, 97, 98)))
+df1 <- subset(df1, !(IRALCAGE %in% c(991))) # Exclude respondents who never used alcohol. 
+df1 <- subset(df1, !(RSKCOCWK %in% c(85, 94, 97, 98)))
+df1 <- subset(df1, !(RSKCOCMON %in% c(85, 94, 97, 98)))
+df1 <- subset(df1, !(IRCIGAGE %in% c(991))) # Exclude respondents who never used cigarettes. 
+df1 <- subset(df1, !(YEPRTDNG %in% c(97,99))) 
+df1 <- subset(df1, !(YODPREV %in% c(97,99))) 
+
+head(df1)
+```
+
+## Convert categorical variables into factors
+
+```{r}
+df1$COCEVER <- as.factor(df1$COCEVER)
+df1$DIFGETCOC<- as.factor(df1$DIFGETCOC)
+df1$RSKCOCMON <- as.factor(df1$RSKCOCMON)
+df1$RSKCOCWK <- as.factor(df1$RSKCOCWK)
+df1$RSKYFQDGR <- as.factor(df1$RSKYFQDGR)
+df1$RSKYFQTES <- as.factor(df1$RSKYFQTES)
+df1$YEPRTDNG <- as.factor(df1$YEPRTDNG) 
+df1$YODPREV <- as.factor(df1$YODPREV)
+df1$IRSEX <- factor(df1$IRSEX, labels = c("Male", "Female"))
+df1$NEWRACE2 <- factor(df1$NEWRACE2)
+```
+
+## Plots/ exploratory data analysis
+
+```{r}
+ggplot(df1, aes(x = as.factor(COCAGE))) +
+  geom_bar() +
+  xlab("Age of First Cocaine Use") +
+  ggtitle("Age of First Cocaine Use Distribution")
+
+ggplot(df1, aes(x = DIFGETCOC)) +
+  geom_bar() +
+  scale_x_discrete(labels=c("1" = "Probably Impossible", "2" = "Very Difficult", "3" = "Fairly Difficult","4" = "Fairly   Easily","5" = "Very Easy")) +
+  xlab("Difficulty Getting Cocaine") +
+  ggtitle("Difficulty Getting Cocaine Distribution")
+
+ggplot(df1, aes(x = RSKCOCMON)) +
+  geom_bar() + 
+  scale_x_discrete(labels=c("1" = "No Risk", "2" = "Slight Risk", "3" = "Moderate Risk","4" = "Great Risk")) +
+  xlab("Risk Using Cocaine Once a Month") +
+  ggtitle("Risk Using Cocaine Once a Month Distribution")
+
+ggplot(df1, aes(x = RSKCOCWK)) +
+  geom_bar() +
+  scale_x_discrete(labels=c("1" = "No Risk", "2" = "Slight Risk", "3" = "Moderate Risk","4" = "Great Risk")) +
+  xlab("Risk Using Cocaine Once or Twice a Week") +
+  ggtitle("Risk Using Cocaine Once or Twice a Week Distribution")
+
+ggplot(df1, aes(x = RSKYFQDGR, y = COCAGE)) +
+  geom_boxplot() +
+  xlab("Get a real kick out of doing dangerous things") +
+  ylab("Age First Cocaine Use") +
+  scale_x_discrete(labels=c("1" = "Never", "2" = "Seldom", "3" = "Sometimes","4" = "Always")) +
+  ggtitle("Tendency for Dangerous Behavior and Age of First Cocaine Use")
+
+ggplot(df1, aes(x = RSKYFQTES, y = COCAGE)) +
+  geom_boxplot() +
+  xlab("Get a real kick out of doing risky things") +
+  ylab("Age of First Cocaine Use") +
+  scale_x_discrete(labels=c("1" = "Never", "2" = "Seldom", "3" = "Sometimes","4" = "Always")) +
+  ggtitle("Tendency for Risky Behavior and Age of First Cocaine Use")
+
+ggplot(df1, aes(x = IRALCAGE, y = as.factor(COCAGE), color = as.factor(IRSEX))) +
+  geom_point(size = 2) +
+  ggtitle("Age of First Alcohol Use vs. Age First Cocaine Use") +
+  xlab("Age of First Alcohol Use") +
+  ylab("Age of First Cocaine Use")
+
+ggplot(df1, aes(x = IRCIGAGE, y = as.factor(COCAGE), color = as.factor(IRSEX))) +
+  geom_point(size = 2) +
+  ggtitle("Age of First Cigarette Use vs. Age First Cocaine Use") +
+  xlab("Age of First Cigarette Use") +
+  ylab("Age of First Cocaine Use")
+```
+
+## Model selection
+
+## Fitting a full multiple regression model
+
+```{r}
+# Adjusted R-squared:  0.2723
+# p-value: 0.2833
+reg_co_full <- lm(data = df1, COCAGE ~ DIFGETCOC + RSKYFQDGR + RSKYFQTES + IRALCAGE + IRCIGAGE + RSKCOCMON + RSKCOCWK + NEWRACE2 + IRSEX)
+summary(reg_co_full)
+```
+
+## Fit reduced multiple regression models
+
+```{r}
+# Adjusted R-squared: 0.1917 
+# p-value: 0.02982
+reg_co_1 <- lm(data = df1, COCAGE ~ RSKYFQTES)
+summary(reg_co_1)
+
+# Adjusted R-squared: 0.2406
+# p-value: 0.02102
+reg_co_2 <- lm(data = df1, COCAGE ~ DIFGETCOC)
+summary(reg_co_2)
+
+# Adjusted R-squared: 0.2395
+# p-value: 0.05224
+reg_co_3 <- lm(data = df1, COCAGE ~ DIFGETCOC + RSKYFQTES)
+summary(reg_co_3)
+```
+
+## Step forward variable selection 
+
+```{r}
+reg_co_1_null <- lm(COCAGE ~1, data = df1)
+reg_co_1_stepout <- step(reg_co_1_null,
+                       scope = list(lwer = reg_co_1_null, upper = reg_co_full),
+                       method = "forward")
+summary(reg_co_1_stepout)
+
+# Chosen model: lm(formula = COCAGE ~ IRCIGAGE + DIFGETCOC + IRSEX, data = df1)
+
+# Adjusted R-squared: 0.4019 
+# p-value: 0.003314
+```
+
+## Exhaustive search variable selection 
+
+```{r}
+reg_co_1_ex <- regsubsets(data = df1, COCAGE ~ DIFGETCOC + RSKYFQDGR + RSKYFQTES + IRALCAGE + IRCIGAGE + RSKCOCMON + RSKCOCWK + NEWRACE2 + IRSEX)
+reg_co_1_summary <- summary(reg_co_1_ex) 
+reg_co_1_summary
+
+df_exh <- data.frame(adjR2 = reg_co_1_summary$adjr2, nvar = 1:length(reg_co_1_summary$adjr2))
+ggplot(df_exh, (aes(nvar, adjR2))) +
+  geom_line()
+which.max(reg_co_1_summary$adjr2)
+
+# Exhaustive search recommends 8 variables, however, since there are factors, each level counts as 1 variable.
+
+reg_ex_model <- lm(data = df1, COCAGE ~ DIFGETCOC + RSKYFQTES + IRALCAGE + RSKCOCMON)
+summary(reg_ex_model)
+
+# Adjusted R-squared: 0.432
+# p-value: 0.01265
+```
+
+## Multiple regression model with the highest adjusted r-squared, thus far:
+
+```{r}
+model_best_pt1 <- lm(data = df1, COCAGE ~ DIFGETCOC + IRCIGAGE + RSKCOCMON + RSKCOCWK + NEWRACE2 + IRSEX)
+plot(model_best_pt1)
+
+summary(model_best_pt1)
+
+# Adjusted R-squared: 0.4537
+# p-value: 0.03522
+```
+
+There are outliers in the data which could contribute to the model only being able to explain approximately 45% of the variance in the response variable according to the adjusted r-squared value. The Q-Q plot shows a fairly normal linear distribution of the data, however, around the max/min values the regression line is displaying some curvature. It is possible that there is multicollinearity among predictors. 
+
+## VIF test for multicollinearity 
+
+```{r}
+vif(reg_co_full) # full multiple regression model
+```
+The variance inflation test indicates a high probability of the presence of multicollinearity among the following predictors:
+
+DIFGETCOC, RSKYFQDGR, RSKYFQTES, RSKCOCMON, RSKCOCWK, and NEWRACE2. 
+
+## Ridge regression model for the shrinkage of predictor coefficent values
+
+```{r}
+X <- model.matrix(data = df1, COCAGE ~ DIFGETCOC + RSKYFQDGR + RSKYFQTES + IRALCAGE + IRCIGAGE + RSKCOCMON + RSKCOCWK + NEWRACE2 + IRSEX)
+set.seed(123)
+cv.ridge = cv.glmnet(X, df1$COCAGE, alpha = 0)
+
+plot(cv.ridge)
+
+cv.ridge # cross-validated MSE: 1.555
+```
+
+## Adding interaction terms to the model
+
+```{r}
+reg_co_5 <- lm(data = df1, COCAGE ~ IRCIGAGE*DIFGETCOC + IRSEX)
+summary(reg_co_5)
+
+# Adjusted R-squared:  0.4446
+# p-value: 0.00769
+
+reg_co_6 <- lm(data = df1, COCAGE ~ DIFGETCOC*IRCIGAGE + NEWRACE2 + IRSEX + RSKCOCMON + RSKCOCWK)
+summary(reg_co_6)
+
+# Adjusted R-squared: 0.5679 
+# p-value: 0.03108
+```
+
+## Cross-validation 
+
+```{r}
+# Full model: 
+glm_co2 <- glm(data = df1, COCAGE ~ DIFGETCOC + RSKYFQDGR + RSKYFQTES + IRALCAGE + IRCIGAGE + RSKCOCMON + RSKCOCWK + IRSEX) 
+glm_co2_cv <- cv.glm(data = df1, glm_co2)
+glm_co2_cv$delta # Prediction MSE = 3.696113 3.613343
+
+# Model with the lowest cross-validated prediction MSE:
+glm_co3 <- glm(data = df1, COCAGE ~ DIFGETCOC + IRCIGAGE)
+glm_co_cv3 <- cv.glm(data = df1, glm_co3)
+glm_co_cv3$delta # Prediction MSE = 1.246017 1.238274
+```
+
+## General takeaway:
+
+The model with the lowest cross-validated prediction MSE only included two predictor variables. However, this model has quite a low adjusted r-squared value. Therefore, I would recommend further evaluation of the data and the predictor variables with high GVIF values before recommending a model.
+
+# Question 2
+
+## Utilize classification methods to determine whether a respondent used cocaine for the first time before 18 years old (yes/no) can be effectively classified based on demographic variables, perceived risk of cocaine use, availability of cocaine, danger seeking, age of first alcohol use, and age of first cigarette use.
+
+## Data cleaning
+
+```{r}
+df_20.21 |>
+  select(DIFGETCOC,FUCOC18,RSKYFQDGR,RSKYFQTES,IRALCAGE,IRCIGAGE,COCEVER,COCAGE,RSKCOCMON,RSKCOCWK,NEWRACE2,IRSEX) -> df1
+
+df1 <- subset(df1, !(COCAGE %in% c(991, 985, 994, 997, 998)))
+df1 <- subset(df1, !(COCEVER %in% c(991))) # Exclude respondents who never used cocaine. 
+df1 <- subset(df1, !(DIFGETCOC %in% c(85, 94, 97, 98))) 
+df1 <- subset(df1, !(RSKYFQDGR %in% c(85, 94, 97, 98)))
+df1 <- subset(df1, !(RSKYFQTES %in% c(85, 94, 97, 98)))
+df1 <- subset(df1, !(IRALCAGE %in% c(991))) # Exclude respondents who never used alcohol. 
+df1 <- subset(df1, !(RSKCOCWK %in% c(85, 94, 97, 98)))
+df1 <- subset(df1, !(RSKCOCMON %in% c(85, 94, 97, 98)))
+df1 <- subset(df1, !(IRCIGAGE %in% c(991))) # Exclude respondents who never used cigarettes. 
+
+head(df1)
+```
+
+## Convert categorical variables into factors 
+
+```{r}
+df1$COCEVER <- as.factor(df1$COCEVER)
+df1$DIFGETCOC<- as.factor(df1$DIFGETCOC)
+df1$RSKCOCMON <- as.factor(df1$RSKCOCMON)
+df1$RSKCOCWK <- as.factor(df1$RSKCOCWK)
+df1$RSKYFQDGR <- as.factor(df1$RSKYFQDGR)
+df1$RSKYFQTES <- as.factor(df1$RSKYFQTES)
+df1$IRSEX <- factor(df1$IRSEX, labels = c("Male", "Female"))
+df1$NEWRACE2 <- factor(df1$NEWRACE2)
+df1$FUCOC18 <- factor(df1$FUCOC18)
+```
+
+## Plots/ exploratory data analysis
+
+```{r}
+ggplot(df1, aes(x = COCAGE))  +
+  geom_bar() +
+  xlab("Age of First Cocaine Use") +
+  ggtitle("Age of First Cocaine Use Distribution")
+
+ggplot(df1, aes(x = FUCOC18)) +
+  geom_bar() +
+  xlab("First used Cocaine Before 18 Years Old") +
+  scale_x_discrete(labels=c("1" = "Yes", "2" = "No")) 
+
+ggplot(df1, aes(x = DIFGETCOC)) +
+  geom_bar() +
+  scale_x_discrete(labels=c("1" = "Probably Impossible", "2" = "Very Difficult", "3" = "Fairly Difficult","4" = "Fairly   Easily","5" = "Very Easy")) +
+  xlab("Difficulty Getting Cocaine") +
+  ggtitle("Difficulty Getting Cocaine Distribution")
+
+ggplot(df1, aes(x = RSKCOCMON)) +
+  geom_bar() + 
+  scale_x_discrete(labels=c("1" = "No Risk", "2" = "Slight Risk", "3" = "Moderate Risk","4" = "Great Risk")) +
+  xlab("Risk Using Cocaine Once a Month") +
+  ggtitle("Risk Using Cocaine Once a Month Distribution")
+
+ggplot(df1, aes(x = RSKCOCWK)) +
+  geom_bar() +
+  scale_x_discrete(labels=c("1" = "No Risk", "2" = "Slight Risk", "3" = "Moderate Risk","4" = "Great Risk")) +
+  xlab("Risk Using Cocaine Once or Twice a Week") +
+  ggtitle("Risk Using Cocaine Once or Twice a Week Distribution")
+
+ggplot(df1, aes(x = RSKYFQDGR, y = COCAGE)) +
+  geom_boxplot() +
+  xlab("Get a real kick out of doing dangerous things") +
+  ylab("Age First Cocaine Use") +
+  scale_x_discrete(labels=c("1" = "Never", "2" = "Seldom", "3" = "Sometimes","4" = "Always")) +
+  ggtitle("Tendency for Dangerous Behavior and Age of First Cocaine Use")
+
+ggplot(df1, aes(x = RSKYFQTES, y = COCAGE)) +
+  geom_boxplot() +
+  xlab("Get a real kick out of doing risky things") +
+  ylab("Age of First Cocaine Use") +
+  scale_x_discrete(labels=c("1" = "Never", "2" = "Seldom", "3" = "Sometimes","4" = "Always")) +
+  ggtitle("Tendency for Risky Behavior and Age of First Cocaine Use")
+
+ggplot(df1, aes(x = IRALCAGE, y = as.factor(COCAGE), color = as.factor(IRSEX))) +
+  geom_point(size = 2) +
+  ggtitle("Age of First Alcohol Use vs. Age First Cocaine Use") +
+  xlab("Age of First Alcohol Use") +
+  ylab("Age of First Cocaine Use")
+
+ggplot(df1, aes(x = IRCIGAGE, y = as.factor(COCAGE), color = as.factor(IRSEX))) +
+  geom_point(size = 2) +
+  ggtitle("Age of First Cigarette Use vs. Age First Cocaine Use") +
+  xlab("Age of First Cigarette Use") +
+  ylab("Age of First Cocaine Use")
+```
+
+
+## Logistic regression
+
+Predicting FUCOC18: First used cocaine before 18 years old. 1 = yes, 2 = no.
+
+```{r}
+# Full model
+logreg <- glm(FUCOC18 ~  DIFGETCOC + RSKYFQDGR + RSKYFQTES + IRALCAGE + IRCIGAGE + RSKCOCMON + RSKCOCWK + NEWRACE2 + IRSEX, family = binomial, data = df1)
+summary(logreg)
+
+# Reduced model (Removed RSKYFDGR, the variable with the least significant levels overall)
+logreg2 <- glm(FUCOC18 ~  DIFGETCOC + RSKYFQTES + IRALCAGE + IRCIGAGE + RSKCOCMON + RSKCOCWK + NEWRACE2 + IRSEX, family = binomial, data = df1)
+summary(logreg2)
+```
+
+## Histogram of the fitted values and the plots of the OLS results
+
+```{r}
+# Full logistic regression model
+ggplot(logreg$df1, aes(x = logreg$fitted.values)) +
+  geom_histogram( bins = 100) +
+  ggtitle("Full Logistic Regression Model")
+
+# Reduced logistic regression model
+ggplot(logreg2$df1, aes(x = logreg2$fitted.values)) +
+  geom_histogram( bins = 100) +
+  ggtitle("Reduced Logistic Regression Model")
+```
+
+## Plots of logistic regression models
+
+```{r}
+# Full logistic regression model
+plot(logreg)
+
+# Reduced logistic regression model
+plot(logreg2)
+```
+
+Plots of both the full and reduced models show that there are outliers in the data. Since the points curve off at the extremities of the Q-Q plot, this would indicate the data has more extreme values than data coming from a perfectly normal distribution.
+
+## Deviance: the measure of "goodness of fit" used in general linear models
+
+Note: The closer the p-value is to one, the closer the model corresponds to a "perfect" saturated model. 
+
+```{r}
+# Just the intercept term/ null deviance 
+pchisq(logreg$null.deviance, logreg$df.null, lower.tail = FALSE)
+
+# Full model
+pchisq(logreg$deviance, logreg$df.residual, lower.tail = FALSE)
+
+# Reduced model
+pchisq(logreg2$deviance, logreg2$df.residual, lower.tail = FALSE)
+```
+Both of the models are very close to 1, which suggests that they fit the data well. Specifically, the full model is a better fit according to the amount of deviance. 
+
+## Predicting new values 
+
+## Tune the model to select a threshold
+
+```{r}
+df1 <- tidyr::drop_na(df1)
+
+# Define the split between training and testing data
+set.seed(1234)
+training_pct <- .5
+Z <- sample(nrow(df1), floor(training_pct*nrow(df1)))
+log_train <- df1[Z, ]
+log_test <- df1[-Z, ]
+
+# Run the model on the training data
+logreg <- glm(FUCOC18 ~  DIFGETCOC + RSKYFQTES + IRALCAGE + IRCIGAGE + RSKCOCMON + RSKCOCWK + NEWRACE2 + IRSEX, data = log_train, family = "binomial")
+
+summary(logreg)
+```
+
+## Predicting with the test data
+
+```{r}
+# Get predictions on the test data
+Prob <- predict(logreg, type = "response", newdata = log_test)
+
+# Set up the possible thresholds
+threshold <- seq(0, 1, .01)
+length(threshold)
+```
+
+## Test all the possible thresholds
+
+```{r}
+TPR <-  FPR <- err.rate <- rep(0, length(threshold))
+
+for (i in seq_along(threshold)) {
+Yhat <- rep(NA_character_, nrow(log_test)) 
+Yhat <-  ifelse(Prob >= threshold[[i]], "1", "2")
+
+err.rate[i] <- mean(Yhat != log_test$FUCOC18)
+TPR[[i]] <- sum(Yhat == "1" & log_test$FUCOC18 == "1") /
+  sum(log_test$FUCOC18 == "1")
+FPR[[i]] <- sum(Yhat == "1" & log_test$FUCOC18 == "2") /
+  sum(log_test$FUCOC18 == "2")
+}
+
+ggplot(tibble(threshold, err.rate),
+       aes(threshold, err.rate)) + 
+  geom_point()
+
+table(log_test$FUCOC18)
+
+# What is the minimum error rate of our model? 0.2207331
+min(err.rate)
+
+# What is the best threshold?
+which.min(err.rate)
+
+threshold[which.min(err.rate)]
+
+Yhat <- ifelse(Prob >= threshold[which.min(err.rate)], "1", "2")
+table(Yhat, log_test$FUCOC18)
+```
+
+## Determine how well the logistic regression model performs
+
+```{r}
+round(mean(log_test$FUCOC18 == Yhat), 3) # Correct classification rate
+```
+Correct classification rate of 77.9%
+
+## LDA & QDA
+
+## LDA: The LDA discriminant function assumes equal variance for all classes
+
+```{r}
+suppressMessages(library(tidyverse))
+library(MASS)
+library(ISLR2)
+
+# Define the split between training and testing data
+set.seed(1234)
+training_pct <- .5
+Z <- sample(nrow(df1), floor(training_pct*nrow(df1)))
+lda_train <- df1[Z, ]
+lda_test <- df1[-Z, ]
+
+lda_out <- lda(FUCOC18 ~  DIFGETCOC + RSKYFQTES + IRALCAGE + IRCIGAGE + RSKCOCMON + RSKCOCWK + NEWRACE2 + IRSEX, data = lda_train) 
+
+Predicted.Direction_lda <- predict(lda_out, data.frame(lda_test))$class
+
+table(lda_test$FUCOC18, Predicted.Direction_lda)
+```
+
+## How well did the LDA model perform?
+
+```{r}
+round(mean(lda_test$FUCOC18 == Predicted.Direction_lda), 3) # Classification Rate
+```
+Correct classification rate of 78.1%
+
+## QDA: The QDA discriminant function does not assume equal variance for all classes. 
+
+```{r}
+# Define the split between training and testing data
+set.seed(1234)
+training_pct <- .5
+Z <- sample(nrow(df1), floor(training_pct*nrow(df1)))
+qda_train <- df1[Z, ]
+qda_test <- df1[-Z, ]
+
+qda_out <- qda(FUCOC18 ~  DIFGETCOC + RSKYFQTES + IRALCAGE + IRCIGAGE + RSKCOCMON + RSKCOCWK + NEWRACE2 + IRSEX, data = qda_train) 
+
+Predicted.Direction_qda <- predict(qda_out, data.frame(qda_test))$class
+
+table(qda_test$FUCOC18, Predicted.Direction_qda)
+```
+
+## How well did the QDA model perform?
+
+```{r}
+round(mean(qda_test$FUCOC18 == Predicted.Direction_qda), 3)
+```
+Correct classification rate of 75.8%
+
+## General takeaway:
+
+The model with the highest correct classification rate on the testing data was the LDA model. Therefore, I would recommend the following model for classifying whether an respondent used cocaine for the first time before age 18:
+
+lda(FUCOC18 ~  DIFGETCOC + RSKYFQTES + IRALCAGE + IRCIGAGE + RSKCOCMON + RSKCOCWK + NEWRACE2 + IRSEX)
+
+
+
