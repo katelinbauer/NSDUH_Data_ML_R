@@ -19,6 +19,7 @@ DIFGETCOC: How difficult to get cocaine? Probably Impossible. Very Difficult. Fa
 RSKYFQDGR: Get a real kick out of doing dangerous things? Never. Seldom. Sometimes. Always.
 
 RSKYFQTES: Like to test yourself by doing risky things? Never. Seldom. Sometimes. Always. 
+
 CATAGE: Age category. 12-17. 18-25. 26-34. 35 or Older.
 
 IRALCAGE: Alcohol age of first use. (991 = Never used) 
